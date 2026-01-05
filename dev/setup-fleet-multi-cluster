@@ -1,0 +1,30 @@
+#!/bin/bash
+# Description: install fleet into upstream and downstream cluster
+
+set -euxo pipefail
+
+if [ ! -d ./charts/fleet ]; then
+  echo "please change the current directory to the fleet repo checkout"
+  exit 1
+fi
+
+upstream_ctx="${FLEET_E2E_CLUSTER-k3d-upstream}"
+
+kubectl config use-context "$upstream_ctx"
+
+dev/setup-fleet
+dev/setup-fleet-managed-downstream
+
+kubectl config use-context "$upstream_ctx"
+
+ns=${FLEET_E2E_NS_DOWNSTREAM-fleet-default}
+
+# Wait for clusters to become "ready" by waiting for bundles to become ready.
+num_clusters=$(k3d cluster list -o json | jq -r '.[].name | select( . | contains("downstream") )' | wc -l)
+while [[ $(kubectl get clusters.fleet.cattle.io -n "$ns" | grep '1/1' -c) -ne $num_clusters ]]; do
+  sleep 1
+done
+
+for cluster in $(kubectl get clusters.fleet.cattle.io -n "$ns" -o jsonpath='{.items[*].metadata.name}'); do
+  kubectl patch clusters.fleet.cattle.io "$cluster" -n "$ns" --type=json -p '[{"op": "add", "path": "/metadata/labels/env", "value": "test" }]'
+done

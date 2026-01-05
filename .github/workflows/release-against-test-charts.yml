@@ -1,0 +1,191 @@
+name: Release Fleet against test Rancher charts repo
+on:
+  workflow_dispatch:
+    inputs:
+      charts_base_branch:
+        description: "Use the following rancher/charts branch as a base (e.g. dev-v2.7)"
+        required: true
+        default: "dev-v2.12"
+        type: string
+      charts_repo:
+        description: "Push to the following Rancher charts repo (which must exist)"
+        required: true
+        default: "fleetrepoci/charts"
+        type: string
+      charts_target_branch:
+        description: "Use the following branch as a destination when pushing to the charts repo"
+        type: string
+  workflow_call:
+    # Variables to set when calling this reusable workflow
+    inputs:
+      charts_base_branch:
+        description: "Use the following rancher/charts branch as a base (e.g. dev-v2.7)"
+        required: true
+        default: "dev-v2.12"
+        type: string
+      charts_repo:
+        description: "Push to the following Rancher charts repo (which must exist)"
+        required: true
+        default: "fleetrepoci/charts"
+        type: string
+      charts_target_branch:
+        description: "Use the following branch as a destination when pushing to the charts repo"
+        type: string
+    outputs:
+      target_branch:
+        value: ${{ jobs.push-test-rancher-charts.outputs.target_branch }}
+      charts_repo:
+        value: ${{ jobs.push-test-rancher-charts.outputs.charts_repo }}
+
+env:
+  GOARCH: amd64
+
+permissions:
+  contents: write
+
+jobs:
+  push-test-rancher-charts:
+    runs-on: ubuntu-latest
+
+    outputs:
+      target_branch: ${{ steps.compute_target_branch.outputs.target_branch }}
+      charts_repo: ${{ steps.compute_env.outputs.charts_repo }}
+    steps:
+      - name: Set environment variables
+        id: compute_env
+        run: |
+          tmp=${{github.event.inputs.charts_base_branch}}
+          charts_base_branch=${tmp:-'dev-v2.12'}
+
+          tmp=${{github.event.inputs.charts_repo}}
+          charts_repo=${tmp:-fleetrepoci/charts}
+
+          echo "charts_base_branch=$charts_base_branch" >> "$GITHUB_OUTPUT"
+          echo "charts_repo=$charts_repo" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout rancher/fleet
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+          path: fleet
+
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6
+        with:
+          go-version-file: 'fleet/go.mod'
+          check-latest: true
+
+      - name: Build fleet binaries
+        run: |
+          cd ./fleet
+          ./.github/scripts/build-fleet-binaries.sh
+          cd -
+
+      - name: Get UUID
+        id: uuid
+        run: echo "uuid=$(uuidgen)" >> $GITHUB_OUTPUT
+
+      - name: Extract metadata for Fleet controller image
+        id: meta-fleet
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: |
+            ttl.sh/rancher-fleet-${{ steps.uuid.outputs.uuid }}
+          tags: type=raw,value=1h
+
+      - name: Build and push Fleet controller image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: ./fleet
+          file: ./fleet/package/Dockerfile
+          build-args: |
+            ARCH=${{ env.GOARCH }}
+          push: true
+          tags: ${{ steps.meta-fleet.outputs.tags }}
+          labels: ${{ steps.meta-fleet.outputs.labels }}
+
+      - name: Extract metadata for Fleet agent image
+        id: meta-fleet-agent
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: |
+            ttl.sh/rancher-fleet-agent-${{ steps.uuid.outputs.uuid }}
+          tags: type=raw,value=1h
+
+      - name: Build and push Fleet agent image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: ./fleet
+          file: ./fleet/package/Dockerfile.agent
+          build-args: |
+            ARCH=${{ env.GOARCH }}
+          push: true
+          tags: ${{ steps.meta-fleet-agent.outputs.tags }}
+          labels: ${{ steps.meta-fleet-agent.outputs.labels }}
+
+      - name: Checkout test charts repo
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+          token: ${{secrets.CI_PUSH_TO_FLEETREPOCI}}
+          repository: ${{ steps.compute_env.outputs.charts_repo }}
+          path: charts
+
+      - name: Compute target branch name
+        id: compute_target_branch
+        run: |
+          target_branch_name=${{github.event.inputs.charts_target_branch}}
+
+          if [ ${{github.event_name}} = 'pull_request' ]; then
+            target_branch_name=${{github.event.pull_request.head.ref}}
+          elif [ -z ${{github.event.inputs.charts_target_branch}} ]; then
+            target_branch_name=${{steps.compute_env.outputs.charts_base_branch}}-$(date +%Y%m%d%H%M%S)
+          fi
+
+          # Append prefix if not present
+          prefix='fleetci-'
+          if [ "${target_branch_name/$prefix/}" = $target_branch_name ]; then
+            target_branch_name=$prefix$target_branch_name
+          fi
+
+          echo "target_branch=$target_branch_name" >> "$GITHUB_OUTPUT"
+
+      - name: Set up test charts repo with latest upstream state
+        run: |
+          cd charts
+          # Add upstream remote and fetch from it
+          git remote add -f upstream https://github.com/rancher/charts
+
+          target_branch=${{steps.compute_target_branch.outputs.target_branch}}
+          base_branch=${{steps.compute_env.outputs.charts_base_branch}}
+
+          git checkout -b $target_branch upstream/$base_branch
+          if [ $? -eq 128 ]; then # branch already exists
+            git checkout $target_branch
+            git rebase upstream/$base_branch
+          fi
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt install -y --allow-change-held-packages snapd
+          sudo snap install yq --channel=v4/stable
+
+      - name: Run release script
+        run: |
+          fleet_test_version=9.9.9
+
+          latest_fleet_rancher_version=$(ls ./charts/charts/fleet/ | tail -1)
+          latest_chart="${latest_fleet_rancher_version%%+*}"
+          latest_fleet="${latest_fleet_rancher_version#*+up}"
+
+          ./fleet/.github/scripts/release-against-test-charts.sh \
+            $latest_fleet \
+            $fleet_test_version \
+            $latest_chart \
+            999.9.9 \
+            ${{ steps.uuid.outputs.uuid }}
+
+      - name: Push to custom branch
+        run: |
+          cd charts
+          git push -u origin ${{ steps.compute_target_branch.outputs.target_branch }}

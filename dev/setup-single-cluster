@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+export DEFAULT_CONFIG="dev/env.single-cluster-defaults"
+export CUSTOM_CONFIG_FILE="env.single-cluster"
+
+# shellcheck source=dev/setup-cluster-config
+source ./dev/setup-cluster-config
+
+if [ $1 = "--reuse" ]; then
+    ./dev/remove-fleet
+else
+    # Cleans with settings sourced, so it should be rather selective.
+    ./dev/k3d-clean
+
+    PORT_OFFSET=0
+    if [ -z "$external_ip" ];
+    then
+     PORT_OFFSET=$(( RANDOM % 10001 ))
+    fi
+
+    ./dev/setup-k3d "${FLEET_E2E_CLUSTER#k3d-}" "$PORT_OFFSET"
+fi
+
+./dev/build-fleet
+./dev/import-images-k3d
+./dev/setup-fleet "${FLEET_E2E_CLUSTER#k3d-}" '[
+    {
+        "id": "shard0",
+        "nodeSelector": {
+            "kubernetes.io/hostname": "k3d-upstream-server-0"
+        }
+    },
+    {
+        "id": "shard1"
+    },
+    {
+        "id": "shard2",
+        "nodeSelector": {
+            "kubernetes.io/hostname": "k3d-upstream-server-2"
+        }
+    }
+]'
+
+# needed for gitrepo tests
+./dev/import-images-tests-k3d
+./dev/create-zot-certs 'FleetCI-RootCA' # for OCI tests
+set +e # keep going if secrets already exist
+./dev/create-secrets 'FleetCI-RootCA'
+go run ./e2e/testenv/infra/main.go setup

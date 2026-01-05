@@ -1,0 +1,180 @@
+package singlecluster_test
+
+import (
+	"fmt"
+	"math/rand"
+	"os"
+	"path"
+	"strconv"
+	"strings"
+
+	"github.com/go-git/go-git/v5"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/rancher/fleet/e2e/testenv"
+	"github.com/rancher/fleet/e2e/testenv/githelper"
+	"github.com/rancher/fleet/e2e/testenv/kubectl"
+)
+
+var _ = Describe("GitRepoPollingDisabled", Label("infra-setup"), func() {
+	var (
+		tmpDir           string
+		clonedir         string
+		k                kubectl.Command
+		gh               *githelper.Git
+		clone            *git.Repository
+		repoName         string
+		inClusterRepoURL string
+		gitrepoName      string
+		r                = rand.New(rand.NewSource(GinkgoRandomSeed()))
+		targetNamespace  string
+	)
+
+	BeforeEach(func() {
+		k = env.Kubectl.Namespace(env.Namespace)
+	})
+
+	JustBeforeEach(func() {
+		// Build git repo URL reachable _within_ the cluster, for the GitRepo
+		host := githelper.BuildGitHostname()
+
+		addr, err := githelper.GetExternalRepoAddr(env, port, repoName)
+		Expect(err).ToNot(HaveOccurred())
+		gh = githelper.NewHTTP(addr)
+
+		inClusterRepoURL = gh.GetInClusterURL(host, port, repoName)
+
+		tmpDir, _ = os.MkdirTemp("", "fleet-")
+		clonedir = path.Join(tmpDir, repoName)
+
+		gitrepoName = testenv.RandomFilename("gitjob-test", r)
+	})
+
+	AfterEach(func() {
+		_ = os.RemoveAll(tmpDir)
+
+		_, err := k.Delete("gitrepo", gitrepoName)
+		Expect(err).ToNot(HaveOccurred())
+
+		Eventually(func() string {
+			out, _ := k.Get("bundledeployments", "-A")
+			return out
+		}).ShouldNot(ContainSubstring(gitrepoName))
+
+		out, err := k.Namespace("cattle-fleet-system").Logs(
+			"-l",
+			"app=fleet-controller",
+			"-c",
+			"fleet-controller",
+		)
+		Expect(err).ToNot(HaveOccurred())
+
+		// Errors about resources other than bundles or bundle deployments not being found at deletion time
+		// should be ignored, as they may result from other test suites.
+		Expect(out).ToNot(MatchRegexp(
+			`ERROR.*Reconciler error.*Bundle(Deployment)?.fleet.cattle.io \\".*\\" not found`,
+		))
+
+		out, err = k.Delete("ns", targetNamespace, "--wait=false")
+		Expect(err).ToNot(HaveOccurred(), out)
+	})
+
+	When("applying a gitrepo with disable polling", func() {
+		BeforeEach(func() {
+			repoName = "repo"
+			targetNamespace = testenv.NewNamespaceName("disable-polling", r)
+		})
+
+		JustBeforeEach(func() {
+			var err error
+			clone, err = gh.Create(clonedir, testenv.AssetPath("gitrepo/sleeper-chart"), "disable_polling")
+			Expect(err).ToNot(HaveOccurred())
+
+			err = testenv.ApplyTemplate(k, testenv.AssetPath("gitrepo/gitrepo-polling-disabled.yaml"), struct {
+				Name            string
+				Repo            string
+				Branch          string
+				TargetNamespace string
+			}{
+				gitrepoName,
+				inClusterRepoURL,
+				gh.Branch,
+				targetNamespace,
+			})
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("deploys the resources initially and updates them while force updating", func() {
+			By("checking the pod exists")
+			Eventually(func() string {
+				out, _ := k.Namespace(targetNamespace).Get("pods")
+				return out
+			}).Should(ContainSubstring("sleeper-"))
+
+			By("Updating the git repository")
+			replace(path.Join(clonedir, "disable_polling", "templates", "deployment.yaml"), "name: sleeper", "name: newsleep")
+
+			commit, err := gh.Update(clone)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Verifying the pods aren't updated")
+			Consistently(func() string {
+				out, _ := k.Namespace(targetNamespace).Get("pods")
+				return out
+			}, testenv.MediumTimeout, testenv.ShortTimeout).ShouldNot(ContainSubstring("newsleep"))
+
+			By("Getting the current GitRepo generation before force sync")
+			var currentGeneration int64
+			Eventually(func() error {
+				out, err := k.Get("gitrepo", gitrepoName, "-o", "jsonpath={.metadata.generation}")
+				if err != nil {
+					return err
+				}
+				if out != "" {
+					generation, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+					if err != nil {
+						return fmt.Errorf("failed to parse generation: %w", err)
+					}
+					currentGeneration = generation
+				}
+				return nil
+			}).Should(Succeed())
+
+			By("Force updating the GitRepo")
+			patch := `{"spec": {"forceSyncGeneration": 1}}`
+			out, err := k.Run("patch", "gitrepo", gitrepoName, "--type=merge", "--patch", patch)
+			Expect(err).ToNot(HaveOccurred(), out)
+
+			By("Waiting for the GitRepo generation to change")
+			Eventually(func() string {
+				out, _ := k.Get("gitrepo", gitrepoName, "-o", "jsonpath={.metadata.generation}")
+				return out
+			}, testenv.MediumTimeout, testenv.ShortTimeout).ShouldNot(Equal(fmt.Sprintf("%d", currentGeneration)))
+
+			By("Waiting for the controller to process the force sync")
+			Eventually(func() string {
+				out, _ := k.Get("gitrepo", gitrepoName, "-o", "jsonpath={.status.observedGeneration}")
+				return out
+			}, testenv.MediumTimeout, testenv.ShortTimeout).ShouldNot(BeEmpty())
+
+			By("Waiting for the GitRepo to be force synced with new commit")
+			Eventually(func() string {
+				out, _ := k.Get("gitrepo", gitrepoName, "-o", "jsonpath={.status.commit}")
+				return out
+			}, testenv.MediumTimeout, testenv.ShortTimeout).Should(Equal(commit), "GitRepo should have the new commit after force sync")
+
+			By("Verifying the pods are updated")
+			Eventually(func() string {
+				out, _ := k.Namespace(targetNamespace).Get("pods")
+				return out
+			}, testenv.MediumTimeout, testenv.ShortTimeout).Should(ContainSubstring("newsleep"))
+
+			By("Verifying the commit hash is updated in status")
+			Eventually(func() string {
+				out, _ := k.Get("gitrepo", gitrepoName, "-o", "jsonpath={.status.commit}")
+				return out
+			}, testenv.MediumTimeout, testenv.ShortTimeout).Should(Equal(commit))
+		})
+	})
+})

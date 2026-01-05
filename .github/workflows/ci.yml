@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  schedule:
+    - cron:  '0 5 * * *'
+  pull_request:
+  push:
+    branches:
+    - 'release/*'
+
+env:
+  GOARCH: amd64
+  CGO_ENABLED: 0
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      -
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+
+      -
+        name: Set up chart-testing
+        uses: helm/chart-testing-action@0d28d3144d3a25ea2cc349d6e59901c4ff469b3b # v2.7.0
+      -
+        name: Run chart-testing (lint)
+        run: ct lint --all --validate-maintainers=false charts/
+      -
+        name: helm-unittest
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest.git --version v1.0.2
+          helm unittest ./charts/fleet
+      -
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+      -
+        name: unit-test
+        run: go test -shuffle=on $(go list ./... | grep -v -e /e2e -e /integrationtests -e /benchmarks)
+
+  integration-tests-group1:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+      -
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+      -
+        name: Install Ginkgo CLI
+        run: go install github.com/onsi/ginkgo/v2/ginkgo
+      -
+        name: integration-tests-group1
+        env:
+          SETUP_ENVTEST_VER: v0.0.0-20250218120612-6f6111124902
+          ENVTEST_K8S_VERSION: 1.34
+        run: ./.github/scripts/run-integration-tests-group1.sh
+
+  integration-tests-group2:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+      -
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+      -
+        name: Install Ginkgo CLI
+        run: go install github.com/onsi/ginkgo/v2/ginkgo
+      -
+        name: integration-tests-group2
+        env:
+          SETUP_ENVTEST_VER: v0.0.0-20250218120612-6f6111124902
+          ENVTEST_K8S_VERSION: 1.34
+        run: ./.github/scripts/run-integration-tests-group2.sh

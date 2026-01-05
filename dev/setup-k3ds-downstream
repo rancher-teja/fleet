@@ -1,0 +1,34 @@
+#!/bin/bash
+# Description: Create n downstream clusters
+
+set -euxo pipefail
+
+args=${k3d_args---network fleet}
+docker_mirror=${docker_mirror-}
+name="downstream"
+FLEET_E2E_DS_CLUSTER_COUNT=${FLEET_E2E_DS_CLUSTER_COUNT-1}
+
+if [ -n "$docker_mirror" ]; then
+  TMP_CONFIG="$(mktemp)"
+  trap "rm -f $TMP_CONFIG" EXIT
+
+  cat <<EOF >"$TMP_CONFIG"
+mirrors:
+  "docker.io":
+      endpoint:
+            - $docker_mirror
+EOF
+  args="$args --registry-config $TMP_CONFIG"
+fi
+
+for i in $(seq 1 "$FLEET_E2E_DS_CLUSTER_COUNT"); do
+  k3d cluster create "$name$i" \
+    --servers 1 \
+    --api-port $((36443 + i)) \
+    -p "$((4080 + (1000 * i))):80@server:0" \
+    -p "$((3443 + i)):443@server:0" \
+    --k3s-arg "--tls-san=k3d-$name$i-server-0@server:0" \
+    $args
+done
+
+kubectl config use-context k3d-upstream

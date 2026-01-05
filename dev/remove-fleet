@@ -1,0 +1,41 @@
+#!/bin/sh
+# Warning: do not use this script on a production system!
+
+upstream_ctx="${FLEET_E2E_CLUSTER-k3d-upstream}"
+downstream_ctx="${FLEET_E2E_CLUSTER_DOWNSTREAM-k3d-downstream1}"
+
+ctx=$(kubectl config current-context)
+
+kubectl config use-context "$upstream_ctx"
+
+# Remove controllers
+helm uninstall -n cattle-fleet-system fleet
+
+# Remove finalizers, this will prevent deletion of namespace fleet-local from hanging
+for res in gitrepos.fleet.cattle.io bundledeployments.fleet.cattle.io bundles.fleet.cattle.io; do
+  kubectl get "$res" -A --no-headers | while read ns name  _; do kubectl patch "$res" -n "$ns" "$name" -p '{"metadata":{"finalizers":[]}}' --type=merge; done
+done
+
+# Remove finalizers on contents too
+kubectl get content -o=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | xargs -I{} kubectl patch content {} -p '{"metadata":{"finalizers":[]}}' --type=merge
+
+helm uninstall -n cattle-fleet-system fleet-crd
+
+# make sure crds are removed
+kubectl delete crd gitrepos.fleet.cattle.io bundledeployments.fleet.cattle.io bundles.fleet.cattle.io
+
+kubectl delete ns cattle-fleet-system --now
+kubectl delete ns cattle-fleet-clusters-system --now
+
+kubectl delete ns fleet-local --now
+kubectl delete ns -l "fleet.cattle.io/managed=true"
+
+kubectl delete clusterrolebinding fleet-agent-get-content cattle-fleet-system-fleet-agent-role-binding
+kubectl delete clusterrole cattle-fleet-system-fleet-agent-role fleet-bundle-deployment fleet-content fleet-agent-system-fleet-agent-role
+
+kubectl config use-context "$downstream_ctx"
+helm uninstall -n cattle-fleet-system fleet-agent
+
+kubectl delete ns cattle-fleet-system --now
+
+kubectl config use-context "$ctx"

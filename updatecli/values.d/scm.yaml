@@ -1,0 +1,20 @@
+scms:
+  main: &main
+    enabled: true
+    user: 'fleet-bot'
+    email: 'fleet@suse.de'
+    owner: rancher
+    repository: fleet
+    branch: main
+  v13:
+    <<: *main
+    branch: 'release/v0.13'
+  v12:
+    <<: *main
+    branch: 'release/v0.12'
+  v11:
+    <<: *main
+    branch: 'release/v0.11'
+  v10:
+    <<: *main
+    branch: 'release/v0.10'

@@ -1,0 +1,113 @@
+{
+  "formatters": {
+    "enable": ["goimports"]
+  },
+  "linters": {
+    "default": "none",
+    "enable": [
+      "bodyclose",
+      "contextcheck",
+      "copyloopvar",
+      "dupl",
+      "durationcheck",
+      "errcheck",
+      "errorlint",
+      "funlen",
+      "ginkgolinter",
+      "gocritic",
+      "gocyclo",
+      "gosec",
+      "govet",
+      "ineffassign",
+      "loggercheck",
+      "makezero",
+      "misspell",
+      "nakedret",
+      "nilerr",
+      "noctx",
+      "nolintlint",
+      "revive",
+      "staticcheck",
+      "testifylint",
+      "thelper",
+      "unconvert",
+      "unparam",
+      "unused",
+      "usestdlibvars"
+    ],
+    "exclusions": {
+      "generated": "lax",
+      "presets": [
+        "comments",
+        "common-false-positives",
+        "legacy",
+        "std-error-handling"
+      ],
+      "rules": [
+        {
+          "path": "cmd/fleetcontroller/main.go",
+          "text": "G108: Profiling endpoint is automatically exposed on /debug/pprof"
+        },
+        {
+          "path": "cmd/fleetagent/main.go",
+          "text": "G108: Profiling endpoint is automatically exposed on /debug/pprof"
+        },
+        {
+          "path": "internal/cmd/agent/register/register.go",
+          "text": "G107: Potential HTTP request made with variable url"
+        },
+        {
+          "path": "internal/cmd",
+          "text": "SA1019: workqueue.RateLimiter is deprecated"
+        },
+        {
+          "path": "e2e",
+          "text": "ST1001: should not use dot imports"
+        },
+        {
+          "path": "benchmarks",
+          "text": "ST1001: should not use dot imports"
+        },
+        {
+          "linters": ["revive"],
+          "path": "internal/cmd/agent/deployer/internal/"
+        },
+        {
+          "linters": ["dupl", "funlen", "gocyclo", "gosec"],
+          "path": "_test.go"
+        },
+        {
+          "linters": ["gosec"],
+          "path": "e2e"
+        },
+        {
+          "linters": ["gosec"],
+          "path": "integrationtests"
+        },
+        {
+          "linters": ["gosec"],
+          "path": "benchmarks"
+        }
+      ]
+    },
+    "settings": {
+      "funlen": {
+        "lines": 270,
+        "statements": 110
+      },
+      "revive": {
+        "rules": [
+          {
+            "name": "blank-imports",
+            "severity": "warning"
+          },
+          {
+            "name": "unexported-return",
+            "severity": "warning"
+          }
+        ]
+      }
+    }
+  },
+  "version": "2"
+}

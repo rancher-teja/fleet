@@ -1,0 +1,17 @@
+apiVersion: fleet.cattle.io/v1alpha1
+kind: ClusterGroup
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+  {{- if .Labels }}
+  labels:
+    {{- range $key, $value := .Labels }}
+    {{$key}}: {{$value}}
+    {{- end }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- range $key, $value := .MatchLabels}}
+      {{$key}}: {{$value}}
+      {{- end}}

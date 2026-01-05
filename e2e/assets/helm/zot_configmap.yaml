@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zot-config
+data:
+  config.json: |
+    {{.ZotConfig}}

@@ -1,0 +1,11 @@
+apiVersion: fleet.cattle.io/v1alpha1
+kind: GitRepo
+metadata:
+  name: sample
+  namespace: fleet-local
+spec:
+  repo: "https://github.com/rancher/fleet-test-data"
+  branch: {{.Branch}}
+  paths:
+  - simple-chart-oci
+  ociRegistrySecret: {{.OCIRegistrySecret}}

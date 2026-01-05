@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Name }}
+  labels:
+    app: {{ .App }}
+    env: test
+spec:
+  selector:
+    app: {{ .App }}
+    {{- if .IsDefaultShard }}
+    fleet.cattle.io/shard-default: "{{ .IsDefaultShard }}"
+    {{ else }}
+    fleet.cattle.io/shard-id: {{ .Shard }}
+    {{- end }}
+  ports:
+    - protocol: TCP
+      port: {{ .Port }}
+      targetPort: metrics
+  type: LoadBalancer

@@ -1,0 +1,17 @@
+kind: GitRepo
+apiVersion: fleet.cattle.io/v1alpha1
+metadata:
+  name: {{ .Name }}
+  {{- if ne .Shard "" }}
+  labels:
+    fleet.cattle.io/shard-ref: {{ .Shard }}
+  {{- end }}
+
+spec:
+  repo: https://github.com/rancher/fleet-test-data
+  branch: {{ .Branch }}
+  paths:
+    {{- range .Paths}}
+    - {{.}}
+    {{- end}}
+  targetNamespace: {{ .TargetNamespace }}

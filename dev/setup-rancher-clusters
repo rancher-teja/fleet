@@ -1,0 +1,77 @@
+#!/bin/bash
+
+set -eux
+
+# Check availability of Rancher CLI
+if ! command -v rancher &>/dev/null && ! command -v rancher-cli &>/dev/null; then
+  echo "Error: Either 'rancher' or 'rancher-cli' binary must be installed and available in PATH."
+  exit 1
+fi
+
+if [ ! -d ./.github/scripts ]; then
+  echo "please change the current directory to the fleet repo checkout"
+  exit 1
+fi
+
+upstream_ctx="${FLEET_E2E_CLUSTER-k3d-upstream}"
+downstream_ctx="${FLEET_E2E_CLUSTER_DOWNSTREAM-k3d-downstream1}"
+rancherpassword="${RANCHER_PASSWORD-rancherpassword}"
+
+public_hostname="${public_hostname:-}"
+if [ -z "${public_hostname}" ]; then
+  ip=
+  while [ -z "$ip" ]; do
+    echo "Waiting for Traefik LoadBalancer IP..."
+    sleep 3
+    ip=$(kubectl get service -n kube-system traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  done
+  public_hostname="$ip.sslip.io"
+fi
+
+version="${1-}"
+channel="${2-latest}" # latest or alpha
+if [ -z "$version" ]; then
+  version=$(curl -SsLf "https://releases.rancher.com/server-charts/$channel/index.yaml" | yq -r '.entries | to_entries | .[].value[] | .version' | sort -V | tail -1)
+fi
+
+kubectl config use-context "$upstream_ctx"
+
+kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+kubectl wait --for=condition=Available deployment --timeout=2m -n cert-manager --all
+
+helm upgrade rancher "https://releases.rancher.com/server-charts/${channel}/rancher-${version#v}.tgz" \
+  --devel \
+  --install \
+  --timeout 10m \
+  --wait \
+  --create-namespace \
+  --namespace cattle-system \
+  --set "extraEnv[0].name=CATTLE_SERVER_URL" \
+  --set "extraEnv[0].value=https://$public_hostname" \
+  --set replicas=1 \
+  --set hostname="$public_hostname" \
+  --set bootstrapPassword="$rancherpassword"
+
+# wait for deployment of rancher
+kubectl -n cattle-system rollout status deploy/rancher
+
+echo "Waiting for fleet deployment to appear..."
+timeout 300 bash -c 'until kubectl get deployments -n cattle-fleet-system 2>/dev/null | grep -q fleet; do sleep 2; done'
+
+kubectl -n cattle-fleet-system rollout status deploy/fleet-controller
+
+echo "Waiting for fleet-agent-local bundle to be ready..."
+timeout 300 bash -c 'until kubectl get bundles -n fleet-local 2>/dev/null | grep -E -q "fleet-agent-local.*1/1"; do sleep 2; done'
+
+./.github/scripts/wait-for-loadbalancer.sh
+
+export cluster_downstream="$downstream_ctx"
+export public_hostname="$public_hostname"
+timeout 300 bash -c 'until ./.github/scripts/register-downstream-clusters.sh; do sleep 3; done'
+
+# register-downstream-clusters.sh only supports fleet-default
+export FLEET_E2E_NS_DOWNSTREAM=fleet-default
+./.github/scripts/label-downstream-cluster.sh
+
+echo -----------------------------------------
+echo The Rancher-Interface is available at: https://${public_hostname}/dashboard/?setup=$(kubectl get secret --namespace cattle-system bootstrap-secret -o go-template='{{.data.bootstrapPassword|base64decode}}')

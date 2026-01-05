@@ -1,0 +1,219 @@
+# Upgrade fleet in latest Rancher to dev version and run MC tests
+name: E2E Upgrade Fleet in Rancher To HEAD
+
+on:
+  schedule:
+    # Run everyday day at 1:00 PM
+    - cron:  '0 13 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "checkout git branch/tag"
+        required: true
+        default: "main"
+  push:
+    tags: [ 'v*' ]
+    paths-ignore:
+      - '*.md'
+
+env:
+  GOARCH: amd64
+  CGO_ENABLED: 0
+  SETUP_K3D_VERSION: 'v5.8.3'
+  SETUP_K3S_VERSION: 'v1.34.1-k3s1'
+
+jobs:
+  rancher-fleet-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      -
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref }}
+      -
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+      -
+        name: Install Ginkgo CLI
+        run: go install github.com/onsi/ginkgo/v2/ginkgo
+      -
+        name: Determine cache key
+        id: cache-key
+        run: |
+          DAY_OF_YEAR=$(date +%j)
+          if [ $(($DAY_OF_YEAR % 28)) -eq 0 ]; then
+            echo "value=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          else
+            echo "value=latest" >> $GITHUB_OUTPUT
+          fi
+      -
+        name: Cache crust-gather CLI
+        id: cache-crust
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.local/bin/crust-gather
+          key: ${{ runner.os }}-crust-gather-${{ steps.cache-key.outputs.value }}
+          restore-keys: |
+            ${{ runner.os }}-crust-gather-
+      -
+        name: Install crust-gather CLI
+        run: |
+          if [ "${{ steps.cache-crust.outputs.cache-hit }}" != "true" ]; then
+            echo "Cache not found, downloading from source"
+            mkdir -p ~/.local/bin
+            if curl -sSfL https://github.com/crust-gather/crust-gather/raw/main/install.sh | sh -s -- --yes; then
+              # Cache the binary for future runs
+              if [ ! -f ~/.local/bin/crust-gather ]; then
+                which crust-gather && cp $(which crust-gather) ~/.local/bin/
+              fi
+            else
+              echo "Failed to download crust-gather"
+              exit 1
+            fi
+          else
+            echo "Using cached crust-gather CLI"
+            chmod +x ~/.local/bin/crust-gather
+            sudo ln -sf ~/.local/bin/crust-gather /usr/local/bin/
+          fi
+      -
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: rancher-cli-cache
+        with:
+          path: /home/runner/.local/bin
+          key: ${{ runner.os }}-rancher-cli-2.6.0
+      -
+        name: Install Rancher CLI
+        if: steps.rancher-cli-cache.outputs.cache-hit != 'true'
+        run: |
+          # download an older CLI to avoid https://github.com/rancher/rancher/issues/37574
+          mkdir -p /home/runner/.local/bin
+          wget -q https://github.com/rancher/cli/releases/download/v2.6.0/rancher-linux-amd64-v2.6.0.tar.gz
+          tar -xz --strip-components=2 -f rancher-linux-amd64-v2.6.0.tar.gz -C /home/runner/.local/bin
+          rancher --version
+      -
+        name: Build fleet binaries
+        run: |
+          ./.github/scripts/build-fleet-binaries.sh
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+      -
+        name: Get uuid
+        id: uuid
+        run: echo "::set-output name=uuid::$(uuidgen)"
+      -
+        id: meta-fleet
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: |
+            ttl.sh/rancher/fleet-${{ steps.uuid.outputs.uuid }}
+          tags: type=raw,value=1h
+      -
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          file: package/Dockerfile
+          build-args: |
+            ARCH=${{ env.GOARCH }}
+          push: true
+          tags: ${{ steps.meta-fleet.outputs.tags }}
+          labels: ${{ steps.meta-fleet.outputs.labels }}
+      -
+        id: meta-fleet-agent
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: |
+            ttl.sh/rancher/fleet-agent-${{ steps.uuid.outputs.uuid }}
+          tags: type=raw,value=1h
+      -
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          file: package/Dockerfile.agent
+          build-args: |
+            ARCH=${{ env.GOARCH }}
+          push: true
+          tags: ${{ steps.meta-fleet-agent.outputs.tags }}
+          labels: ${{ steps.meta-fleet-agent.outputs.labels }}
+      -
+        name: Install k3d
+        run: curl --silent --fail https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=${{ env.SETUP_K3D_VERSION }} bash
+      -
+        name: Set up k3d control-plane cluster
+        run: |
+          k3d cluster create upstream --wait \
+            -p "80:80@agent:0:direct" \
+            -p "443:443@agent:0:direct" \
+            --api-port 6443 \
+            --agents 1 \
+            --k3s-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%@agent:*' \
+            --k3s-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%@agent:*' \
+            --network "nw01" \
+            --image docker.io/rancher/k3s:${{ env.SETUP_K3S_VERSION }}
+      -
+        name: Set up k3d downstream cluster
+        run: |
+          k3d cluster create downstream --wait \
+            -p "81:80@agent:0:direct" \
+            -p "444:443@agent:0:direct" \
+            --api-port 6644 \
+            --agents 1 \
+            --k3s-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%@agent:*' \
+            --k3s-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%@agent:*' \
+            --network "nw01" \
+            --image docker.io/rancher/k3s:${{ env.SETUP_K3S_VERSION }}
+      -
+        name: Set up Rancher
+        env:
+          public_hostname: "172.18.0.1.sslip.io"
+        run: |
+          ./.github/scripts/setup-rancher.sh
+          ./.github/scripts/wait-for-loadbalancer.sh
+          ./.github/scripts/register-downstream-clusters.sh
+          sleep 30
+          ./.github/scripts/label-downstream-cluster.sh
+      -
+        name: Create example workload
+        run: |
+          kubectl apply -n fleet-local -f e2e/assets/fleet-upgrade/gitrepo-simple.yaml
+          kubectl apply -n fleet-default -f e2e/assets/fleet-upgrade/gitrepo-simple.yaml
+          # wait for bundle ready
+          until kubectl get bundles -n fleet-local test-simple-simple-chart -o=jsonpath='{.status.conditions[?(@.type=="Ready")].status}' | grep -q "True"; do sleep 3; done
+          until kubectl get bundles -n fleet-default test-simple-simple-chart -o=jsonpath='{.status.conditions[?(@.type=="Ready")].status}' | grep -q "True"; do sleep 3; done
+      -
+        name: Deploy development fleet
+        run: |
+          echo "${{ steps.meta-fleet.outputs.tags }} ${{ steps.meta-fleet-agent.outputs.tags }}"
+          ./.github/scripts/upgrade-rancher-fleet-to-dev-fleet.sh ${{ steps.meta-fleet.outputs.tags }} ${{ steps.meta-fleet-agent.outputs.tags }}
+      -
+        name: E2E tests for examples
+        env:
+          FLEET_E2E_NS: fleet-local
+          FLEET_E2E_NS_DOWNSTREAM: fleet-default
+        run: |
+          kubectl config use-context k3d-upstream
+          export CI_REGISTERED_CLUSTER=$(kubectl get clusters.fleet.cattle.io -n $FLEET_E2E_NS_DOWNSTREAM -o jsonpath='{..name}')
+          ginkgo --github-output --trace e2e/multi-cluster
+      -
+        name: Dump Failed Downstream Environment
+        if: failure()
+        run: |
+          kubectl config use-context k3d-downstream
+          crust-gather collect --exclude-namespace=kube-system --exclude-kind=Lease --duration=5s -f tmp/downstream
+      -
+        name: Upload logs
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        if: failure()
+        with:
+          name: gha-fleet-rancher-logs-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            tmp/downstream
+            tmp/upstream
+          retention-days: 2

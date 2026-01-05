@@ -1,0 +1,215 @@
+# Nightly workflow tests more k8s versions than the e2e-ci workflow for PR does
+name: E2E Nightly Fleet
+
+on:
+  schedule:
+    # Run everyday day at 7:00 AM
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      k3s_version:
+        description: 'K3s version to test (e.g., v1.34.1-k3s1)'
+        required: false
+        default: 'v1.34.1-k3s1'
+      test_type:
+        description: 'Test type to run'
+        required: false
+        default: 'e2e-nosecrets'
+        type: choice
+        options:
+          - acceptance
+          - e2e-secrets
+          - e2e-nosecrets
+
+env:
+  GOARCH: amd64
+  CGO_ENABLED: 0
+  SETUP_K3D_VERSION: 'v5.8.3'
+
+jobs:
+  e2e-fleet-nightly-test:
+    runs-on: runs-on,runner=8cpu-linux-x64,mem=16,run-id=${{ github.run_id }}
+
+    strategy:
+      matrix:
+        k3s_version:
+          # k3d version list k3s | sed 's/+/-/' | sort -h
+          # https://hub.docker.com/r/rancher/k3s/tags
+          - ${{ github.event.inputs.k3s_version || 'v1.34.1-k3s1' }}
+          - ${{ github.event_name == 'schedule' && 'v1.33.5-k3s1' || '' }}
+        test_type:
+          - ${{ github.event.inputs.test_type || 'acceptance' }}
+          - ${{ github.event_name == 'schedule' && 'e2e-secrets' || '' }}
+          - ${{ github.event_name == 'schedule' && 'e2e-nosecrets' || '' }}
+        exclude:
+          - k3s_version: ''
+          - test_type: ''
+    steps:
+      -
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+      -
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+      -
+        name: Install Ginkgo CLI
+        run: go install github.com/onsi/ginkgo/v2/ginkgo
+      -
+        name: Determine cache key
+        id: cache-key
+        run: |
+          DAY_OF_YEAR=$(date +%j)
+          if [ $(($DAY_OF_YEAR % 28)) -eq 0 ]; then
+            echo "value=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          else
+            echo "value=latest" >> $GITHUB_OUTPUT
+          fi
+      -
+        name: Cache crust-gather CLI
+        id: cache-crust
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.local/bin/crust-gather
+          key: ${{ runner.os }}-crust-gather-${{ steps.cache-key.outputs.value }}
+          restore-keys: |
+            ${{ runner.os }}-crust-gather-
+      -
+        name: Install crust-gather CLI
+        run: |
+          if [ "${{ steps.cache-crust.outputs.cache-hit }}" != "true" ]; then
+            echo "Cache not found, downloading from source"
+            mkdir -p ~/.local/bin
+            if curl -sSfL https://github.com/crust-gather/crust-gather/raw/main/install.sh | sh -s -- --yes; then
+              # Cache the binary for future runs
+              if [ ! -f ~/.local/bin/crust-gather ]; then
+                which crust-gather && cp $(which crust-gather) ~/.local/bin/
+              fi
+            else
+              echo "Failed to download crust-gather"
+              exit 1
+            fi
+          else
+            echo "Using cached crust-gather CLI"
+            chmod +x ~/.local/bin/crust-gather
+            sudo ln -sf ~/.local/bin/crust-gather /usr/local/bin/
+          fi
+      -
+        name: Build Fleet Binaries
+        run: |
+          ./.github/scripts/build-fleet-binaries.sh
+
+          cd e2e/testenv/infra
+          go build
+      -
+        name: Build Docker Images
+        run: |
+          ./.github/scripts/build-fleet-images.sh
+
+          DOCKER_BUILDKIT=1 docker build -f e2e/assets/gitrepo/Dockerfile.gitserver -t nginx-git:test --build-arg="passwd=$(openssl passwd foo)" e2e/assets/gitrepo
+      -
+        name: Install k3d
+        run: curl --silent --fail https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=${{ env.SETUP_K3D_VERSION }} bash
+      -
+        name: Provision k3d Cluster
+        run: |
+          k3d cluster create upstream --wait \
+            --agents 1 \
+            --network "nw01" \
+            --image docker.io/rancher/k3s:${{matrix.k3s_version}}
+      -
+        name: Import Images Into k3d
+        run: |
+          ./.github/scripts/k3d-import-retry.sh rancher/fleet:dev rancher/fleet-agent:dev nginx-git:test -c upstream
+      -
+        name: Deploy Fleet
+        run: |
+          SHARDS='[{"id":"shard0"},{"id":"shard1"},{"id":"shard2"}]' ./.github/scripts/deploy-fleet.sh
+      -
+        name: Create Zot certificates for OCI tests
+        if: ${{ matrix.test_type == 'e2e-nosecrets' }}
+        run: |
+          # Generate cert and key for TLS
+          ./.github/scripts/create-zot-certs.sh "FleetCI-RootCA"
+          ./.github/scripts/create-secrets.sh 'FleetCI-RootCA'
+      -
+        name: E2E Tests
+        if: ${{ matrix.test_type == 'e2e-nosecrets' }}
+        env:
+          FLEET_E2E_NS: fleet-local
+          # Git and OCI credentials are here used in a local, ephemeral environment. Leaks would be harmless.
+          GIT_HTTP_USER: "fleet-ci"
+          GIT_HTTP_PASSWORD: "foo"
+          CI_OCI_USERNAME: "fleet-ci"
+          CI_OCI_PASSWORD: "foo"
+          CI_OCI_READER_USERNAME: "fleet-ci-reader"
+          CI_OCI_READER_PASSWORD: "foo-reader"
+          CI_OCI_NO_DELETER_USERNAME: "fleet-ci-no-deleter"
+          CI_OCI_NO_DELETER_PASSWORD: "foo-no-deleter"
+        run: |
+          export CI_OCI_CERTS_DIR="$(git rev-parse --show-toplevel)/FleetCI-RootCA"
+
+          # 1. Run test cases not needing infra
+          ginkgo --github-output --trace --label-filter='!infra-setup' e2e/single-cluster e2e/keep-resources
+
+          # 2. Run tests for metrics
+          ginkgo --github-output --trace --label-filter='!oci-registry' e2e/metrics
+          SHARD=shard1 ginkgo --github-output --trace --label-filter='!oci-registry' e2e/metrics
+
+          # 3. Run tests requiring only the git server
+          e2e/testenv/infra/infra setup --git-server=true
+          ginkgo --github-output --trace --label-filter='infra-setup && !helm-registry && !oci-registry' e2e/single-cluster/
+
+          # 4. Run tests requiring a Helm registry
+          e2e/testenv/infra/infra setup --helm-registry=true
+          ginkgo --github-output --trace --label-filter='helm-registry' e2e/single-cluster
+
+          e2e/testenv/infra/infra teardown --helm-registry=true
+
+          # 5. Run tests requiring an OCI registry
+          e2e/testenv/infra/infra setup --oci-registry=true
+          ginkgo --github-output --trace --label-filter='oci-registry' e2e/single-cluster
+          ginkgo --github-output --trace --label-filter='oci-registry' e2e/metrics
+
+          # 6. Tear down all infra
+          e2e/testenv/infra/infra teardown
+      -
+        name: Acceptance Tests for Examples
+        if: ${{ matrix.test_type == 'acceptance' }}
+        env:
+          FLEET_E2E_NS: fleet-local
+        run: |
+          ginkgo --github-output --trace e2e/acceptance/single-cluster-examples
+      -
+        name: Fleet Tests Requiring Github Secrets
+        if: ${{ matrix.test_type == 'e2e-secrets' }}
+        env:
+          FLEET_E2E_NS: fleet-local
+          GIT_REPO_URL: "git@github.com:fleetrepoci/test.git"
+          GIT_REPO_HOST: "github.com"
+          GIT_REPO_USER: "git"
+          GITHUB_APP_ID:  ${{ secrets.CI_GITHUB_APP_ID }}
+          GITHUB_APP_INSTALLATION_ID:  ${{ secrets.CI_GITHUB_APP_INSTALLATION_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.CI_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_PAT_TOKEN: ${{ secrets.CI_PRIVATE_REPO_PAT }}
+          GIT_REPO_BRANCH: ${{ matrix.k3s_version }}
+          CI_OCI_USERNAME:  ${{ secrets.CI_OCI_USERNAME }}
+          CI_OCI_PASSWORD:  ${{ secrets.CI_OCI_PASSWORD }}
+        run: |
+          export GIT_SSH_KEY="$GITHUB_WORKSPACE/id_ecdsa"
+          export GIT_SSH_PUBKEY="$GITHUB_WORKSPACE/id_ecdsa.pub"
+          echo "${{ secrets.CI_SSH_KEY }}" > "$GIT_SSH_KEY"
+          echo "${{ secrets.CI_SSH_PUBKEY }}" > "$GIT_SSH_PUBKEY"
+
+          ginkgo --github-output --trace e2e/require-secrets
+      -
+        name: Upload Logs
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        if: failure()
+        with:
+          name: gha-nightly-e2e-logs-${{ github.sha }}-${{ matrix.k3s_version }}-${{ matrix.test_type }}-${{ github.run_id }}
+          path: |
+            tmp/upstream
+          retention-days: 2

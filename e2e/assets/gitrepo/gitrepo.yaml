@@ -1,0 +1,29 @@
+kind: GitRepo
+apiVersion: fleet.cattle.io/v1alpha1
+metadata:
+  name: {{.Name}}
+spec:
+  repo: {{.Repo}}
+  branch: {{.Branch}}
+  pollingInterval: {{.PollingInterval}}
+  {{- if .TargetNamespace }}
+  targetNamespace: {{.TargetNamespace}}
+  {{- end }}
+  paths:
+  {{- if .Path }}
+  - {{.Path}}
+  {{- else }}
+  - examples
+  {{- end }}
+  {{- if .CABundle}}
+  caBundle: {{.CABundle}}
+  {{- end}}
+  {{- if .HelmSecretName }}
+  helmSecretName: {{.HelmSecretName}}
+  {{- end }}
+  {{- if .HelmSecretNameForPaths }}
+  helmSecretNameForPaths: {{.HelmSecretNameForPaths}}
+  {{- end }}
+  {{- if .InsecureSkipTLSVerify }}
+  insecureSkipTLSVerify: {{.InsecureSkipTLSVerify}}
+  {{- end }}
