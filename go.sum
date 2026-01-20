@@ -388,8 +388,8 @@ github.com/prometheus/procfs v0.17.0 h1:FuLQ+05u4ZI+SS/w9+BWEM2TXiHKsUQ9TADiRH7D
 github.com/prometheus/procfs v0.17.0/go.mod h1:oPQLaDAMRbA+u8H5Pbfq+dl3VDAvHxMUOVhe0wYB2zw=
 github.com/rancher-teja/lasso v0.0.1 h1:MruFFWWqiooh608SjC/vX0XCtGVFLf03aUTLDs8+jyg=
 github.com/rancher-teja/lasso v0.0.1/go.mod h1:svOYqeyBo4gQmXbwtPkJHvLpTx5auSa+wVmzoXT9f2k=
-github.com/rancher-teja/wrangler/v3 v3.0.1 h1:pN80Oy4ADGyUAA5Z5BBp6F4ie48EKXEk/WHZw8H8U3A=
-github.com/rancher-teja/wrangler/v3 v3.0.1/go.mod h1:if30NyzZpwMgoY4+OgLyGSP3lFTqsjFpF/tOgCgdYL4=
+github.com/rancher-teja/wrangler/v3 v3.0.0-20260120100314-0600ac179b3e h1:E2R7QoVXm3jIxRlpdM/jMpX0pS92j8cr4RUINa8Do4I=
+github.com/rancher-teja/wrangler/v3 v3.0.0-20260120100314-0600ac179b3e/go.mod h1:ZmfLLj7MDs+VxeCdoopSSod//Oxe+Fr2bj+Jj6N8yIo=
 github.com/redis/go-redis/extra/rediscmd/v9 v9.0.5 h1:EaDatTxkdHG+U3Bk4EUr+DZ7fOGwTfezUiUJMaIcaho=
 github.com/redis/go-redis/extra/rediscmd/v9 v9.0.5/go.mod h1:fyalQWdtzDBECAQFBJuQe5bzQ02jGd5Qcbgb97Flm7U=
 github.com/redis/go-redis/extra/redisotel/v9 v9.0.5 h1:EfpWLLCyXw8PSM2/XNJLjI3Pb27yVE+gIAfeqp8LUCc=

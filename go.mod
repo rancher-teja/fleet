@@ -8,7 +8,7 @@ replace (
 	github.com/imdario/mergo => github.com/imdario/mergo v1.0.2
 	github.com/rancher/fleet/pkg/apis => ./pkg/apis
 	github.com/rancher/lasso => github.com/rancher-teja/lasso v0.0.1
-	github.com/rancher/wrangler/v3 => github.com/rancher-teja/wrangler/v3 v3.0.1
+	github.com/rancher/wrangler/v3 => github.com/rancher-teja/wrangler/v3 v3.0.0-20260120100314-0600ac179b3e
 	gopkg.in/go-playground/webhooks.v6 => github.com/go-playground/webhooks/v6 v6.4.0
 )
 
