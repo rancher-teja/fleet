@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"maps"
 	"os"
 	"regexp"
 
@@ -71,11 +70,6 @@ func (h *handler) OnConfig(config *fleetconfig.Config) error {
 	logrus.Debugf("Bootstrap config set, building namespace '%s', secret, local cluster, cluster group, ...", config.Bootstrap.Namespace)
 
 	var objs []runtime.Object
-	localClusterLabels := map[string]string{"name": "local"}
-
-	if config.Bootstrap.ClusterLabels != nil {
-		maps.Copy(localClusterLabels, config.Bootstrap.ClusterLabels)
-	}
 
 	if config.Bootstrap.Namespace == "" || config.Bootstrap.Namespace == "-" {
 		return nil
@@ -89,7 +83,6 @@ func (h *handler) OnConfig(config *fleetconfig.Config) error {
 	if err != nil {
 		return err
 	}
-
 	objs = append(objs, &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: config.Bootstrap.Namespace,
@@ -98,7 +91,9 @@ func (h *handler) OnConfig(config *fleetconfig.Config) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "local",
 			Namespace: config.Bootstrap.Namespace,
-			Labels:    localClusterLabels,
+			Labels: map[string]string{
+				"name": "local",
+			},
 		},
 		Spec: fleet.ClusterSpec{
 			KubeConfigSecret: secret.Name,

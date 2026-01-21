@@ -30,8 +30,6 @@ func App() *cobra.Command {
 		NewDeploy(),
 		gitcloner.NewCmd(gitcloner.New()),
 
-		NewMonitor(),
-		NewAnalyze(),
 		NewDump(),
 	)
 

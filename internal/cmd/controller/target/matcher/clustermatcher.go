@@ -5,11 +5,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-const (
-	// ClusterDisplayNameLabel is the label key used by Rancher to store the cluster display name
-	ClusterDisplayNameLabel = "management.cattle.io/cluster-display-name"
-)
-
 type criteria func(clusterName, clusterGroup string, clusterGroupLabels, clusterLabels map[string]string) bool
 
 type ClusterMatcher struct {
@@ -24,16 +19,8 @@ func NewClusterMatcher(clusterName, clusterGroup string, clusterGroupSelector *m
 	t := &ClusterMatcher{}
 
 	if clusterName != "" {
-		t.criteria = append(t.criteria, func(clusterNameTest, _ string, _, clusterLabels map[string]string) bool {
-			// Match by cluster name (resource name)
-			if clusterName == clusterNameTest {
-				return true
-			}
-			// Also match by display name label for backward compatibility with Rancher
-			if displayName, ok := clusterLabels[ClusterDisplayNameLabel]; ok && clusterName == displayName {
-				return true
-			}
-			return false
+		t.criteria = append(t.criteria, func(clusterNameTest, _ string, _, _ map[string]string) bool {
+			return clusterName == clusterNameTest
 		})
 	}
 
