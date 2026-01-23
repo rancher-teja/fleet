@@ -386,10 +386,10 @@ github.com/prometheus/common v0.67.4 h1:yR3NqWO1/UyO1w2PhUvXlGQs/PtFmoveVO0KZ4+L
 github.com/prometheus/common v0.67.4/go.mod h1:gP0fq6YjjNCLssJCQp0yk4M8W6ikLURwkdd/YKtTbyI=
 github.com/prometheus/procfs v0.17.0 h1:FuLQ+05u4ZI+SS/w9+BWEM2TXiHKsUQ9TADiRH7DuK0=
 github.com/prometheus/procfs v0.17.0/go.mod h1:oPQLaDAMRbA+u8H5Pbfq+dl3VDAvHxMUOVhe0wYB2zw=
-github.com/rancher-teja/lasso v0.0.1 h1:MruFFWWqiooh608SjC/vX0XCtGVFLf03aUTLDs8+jyg=
-github.com/rancher-teja/lasso v0.0.1/go.mod h1:svOYqeyBo4gQmXbwtPkJHvLpTx5auSa+wVmzoXT9f2k=
-github.com/rancher-teja/wrangler/v3 v3.0.0-20260121050704-d55794d5af80 h1:odF4ShYA8kTP6RPMR7YIvANnppmkqVLY2x0b5ssakjs=
-github.com/rancher-teja/wrangler/v3 v3.0.0-20260121050704-d55794d5af80/go.mod h1:ZmfLLj7MDs+VxeCdoopSSod//Oxe+Fr2bj+Jj6N8yIo=
+github.com/rancher-teja/lasso v0.0.2-0.20260123062607-7d5ea1f02e72 h1:i/9gCkhhT+3MIZDZthFedoLtfF1EpRfDVKfEYF0DMXU=
+github.com/rancher-teja/lasso v0.0.2-0.20260123062607-7d5ea1f02e72/go.mod h1:L3ol8PdO21KoMhNa3RWjpR3ZBnE70JCAod1nJuOvT1E=
+github.com/rancher-teja/wrangler/v3 v3.0.0-20260123075108-28540b617aba h1:YQHad3oPWbpDxQIilJR2iC7E/oEv75Xr9vZSXoBpxhM=
+github.com/rancher-teja/wrangler/v3 v3.0.0-20260123075108-28540b617aba/go.mod h1:nkhEP4RFC8KpXzzLzG7zxs21+FRAl5I9GDwQPnlRco0=
 github.com/redis/go-redis/extra/rediscmd/v9 v9.0.5 h1:EaDatTxkdHG+U3Bk4EUr+DZ7fOGwTfezUiUJMaIcaho=
 github.com/redis/go-redis/extra/rediscmd/v9 v9.0.5/go.mod h1:fyalQWdtzDBECAQFBJuQe5bzQ02jGd5Qcbgb97Flm7U=
 github.com/redis/go-redis/extra/redisotel/v9 v9.0.5 h1:EfpWLLCyXw8PSM2/XNJLjI3Pb27yVE+gIAfeqp8LUCc=

@@ -7,8 +7,8 @@ toolchain go1.25.4
 replace (
 	github.com/imdario/mergo => github.com/imdario/mergo v1.0.2
 	github.com/rancher/fleet/pkg/apis => ./pkg/apis
-	github.com/rancher/lasso => github.com/rancher-teja/lasso v0.0.1
-	github.com/rancher/wrangler/v3 => github.com/rancher-teja/wrangler/v3 v3.0.0-20260121050704-d55794d5af80
+	github.com/rancher/lasso => github.com/rancher-teja/lasso v0.0.2-0.20260123062607-7d5ea1f02e72
+	github.com/rancher/wrangler/v3 => github.com/rancher-teja/wrangler/v3 v3.0.0-20260123075108-28540b617aba
 	gopkg.in/go-playground/webhooks.v6 => github.com/go-playground/webhooks/v6 v6.4.0
 )
 

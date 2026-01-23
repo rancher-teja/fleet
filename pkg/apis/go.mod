@@ -4,7 +4,7 @@ go 1.25.0
 
 toolchain go1.25.4
 
-replace github.com/rancher/wrangler/v3 => github.com/rancher-teja/wrangler/v3 v3.0.0-20260121050704-d55794d5af80
+replace github.com/rancher/wrangler/v3 => github.com/rancher-teja/wrangler/v3 v3.0.0-20260123075108-28540b617aba
 
 require (
 	github.com/rancher/wrangler/v3 v3.3.1
